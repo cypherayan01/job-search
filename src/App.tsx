@@ -5,7 +5,7 @@ import {
   Briefcase, 
   Users, 
   GraduationCap, 
-  DollarSign, 
+  IndianRupee, 
   User, 
   FileText, 
   ExternalLink,
@@ -26,7 +26,9 @@ import {
   MonitorPlay, // New icon for educator
   Smile, // New icon for rating
   Trophy, // New icon for difficulty
-  Tags // New icon for skills
+  Tags, // New icon for skills
+  Lightbulb, // New icon for overall recommendations
+  PlusCircle // New icon for expand skills
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -80,6 +82,14 @@ interface ProcessedJob extends BackendJob {
   salaryText: string;
 }
 
+// NEW: Interface for overall course recommendations response
+interface OverallRecommendationsResponse {
+  recommendations: CourseRecommendation[];
+  keywords_processed: string[];
+  total_recommendations: number;
+  processing_time_ms: number;
+}
+
 // --- Component Definition ---
 const App: React.FC = () => {
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
@@ -95,12 +105,73 @@ const App: React.FC = () => {
 
   const [searchTrigger, setSearchTrigger] = useState<number>(0);
 
-  const allSkills = useMemo(() => [
-    'React', 'Python', 'JavaScript', 'SQL', 'Power BI', 'Machine Learning', 'Excel', 'Tableau', 'Node.js',
-    'CSS', 'HTML', 'Data Analysis', 'Data Visualization', 'Redux', 'AWS', 'Docker', 'Kubernetes',
-    'Java', 'C++', 'C#', 'TypeScript', 'Angular', 'Vue.js', 'MongoDB', 'PostgreSQL', 'Django',
-    'Flask', 'Spring Boot', 'Pandas', 'NumPy', 'Scikit-learn', 'TensorFlow', 'PyTorch'
+  // NEW: State for overall course recommendations
+  const [overallRecommendations, setOverallRecommendations] = useState<CourseRecommendation[]>([]);
+  const [skillsWithRecommendations, setSkillsWithRecommendations] = useState<string[]>([]);
+  const [expandedSkills, setExpandedSkills] = useState<Set<string>>(new Set());
+  const [loadingRecommendations, setLoadingRecommendations] = useState<boolean>(false);
+  const [showOverallRecommendations, setShowOverallRecommendations] = useState<boolean>(false);
+
+  const allSkills = useMemo(() => ['Software Development',
+    'React', 'Python', 'JavaScript', 'SQL', 'Power BI', 
+    'CSS', 'HTML', 'Data Analysis', 
+    'Java', 'PostgreSQL', 'Django', 'Data Entry',
+    'Spring Boot'
   ], []);
+
+      const skills_pool = [
+             "Python", "JavaScript", "React", "HTML/CSS", "SQL",
+              "Django",  "Spring Boot", "Data Analysis", "Power BI"
+           ]
+          
+
+  const boostPercentage = useMemo(() => {
+    return Math.floor(Math.random() * (40 - 20 + 1)) + 20;
+  }, []);
+
+  const getBoostPercentage = (skill: string): number => {
+  const skillValues: { [key: string]: number } = {
+      'react': 32,
+      'python': 28,
+      'javascript': 35,
+      'sql': 25,
+      'java': 30,
+      'django': 27,
+      'spring boot': 33,
+      'data analysis': 29,
+      'power bi': 26,
+      'html/css': 24,
+      'postgresql': 31,
+      'machine learning': 38,
+      'node.js': 34,
+      'mongodb': 29,
+      'aws': 36,
+      'docker': 33,
+      'kubernetes': 37,
+      'typescript': 32,
+      'angular': 30,
+      'vue': 28
+    };
+    
+    const skillKey = skill.toLowerCase().trim();
+    
+    // If skill is in our predefined list, return that value
+    if (skillValues[skillKey]) {
+      return skillValues[skillKey];
+    }
+    
+    // Otherwise, generate hash-based value
+    let hash = 0;
+    for (let i = 0; i < skill.length; i++) {
+      const char = skill.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = Math.imul(hash, 0x5bd1e995);
+      hash ^= hash >>> 15;
+    }
+    
+    const positiveHash = Math.abs(hash);
+    return (positiveHash % 21) + 20;
+};
 
   const suggestions = useMemo(() => {
     if (!inputValue) return allSkills.slice(0, 8);
@@ -161,11 +232,112 @@ const App: React.FC = () => {
     }));
   };
 
+  // NEW: Function to get unmatched skills for overall recommendations
+  const getUnmatchedSkills = (jobs: ProcessedJob[], userSkills: string[]): string[] => {
+    const allJobSkills = new Set<string>();
+    jobs.forEach(job => {
+      job.skillsArray.forEach(skill => {
+        allJobSkills.add(skill);
+      });
+    });
+
+    const userSkillsLower = userSkills.map(skill => skill);
+    const unmatchedSkills = Array.from(allJobSkills).filter(
+      jobSkill => !userSkillsLower.includes(jobSkill)
+    );
+
+    console.log(unmatchedSkills);
+    return unmatchedSkills;
+  };
+
+  // NEW: Function to fetch overall course recommendations
+  const fetchOverallRecommendations = async (unmatchedSkills: string[]) => {
+    setLoadingRecommendations(true);
+    try {
+      console.log('Fetching recommendations for unmatched skills:', unmatchedSkills);
+      console.log('skills:',selectedSkills);
+      console.log('skills pool:',skills_pool);
+      const result=skills_pool.filter(skill => !selectedSkills.includes(skill));
+      
+      const randomThree = result.sort(() => Math.random() - 0.5).slice(0, 4);
+      console.log(randomThree);
+      
+
+
+
+      const response = await fetch('http://localhost:8000/recommend_courses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          keywords_unmatched: randomThree
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data: OverallRecommendationsResponse = await response.json();
+      console.log('Received overall recommendations:', data);
+      
+      setOverallRecommendations(data.recommendations || []);
+      setSkillsWithRecommendations(data.keywords_processed || []);
+      setShowOverallRecommendations(true);
+      
+    } catch (err) {
+      console.error('Error fetching overall recommendations:', err);
+      
+      // Mock data for demo
+      const mockRecommendations: CourseRecommendation[] = [
+        {
+          course_name: "React - The Complete Guide",
+          platform: "Udemy",
+          duration: "40.5 hours",
+          link: "https://www.udemy.com/course/react-the-complete-guide-incl-hooks-react-router-redux/",
+          educator: "Maximilian Schwarzmüller",
+          skill_covered: "React, Hooks, Redux",
+          difficulty_level: "All Levels",
+          rating: "4.7/5"
+        },
+         {
+          course_name: "React - The Complete Guide",
+          platform: "Udemy",
+          duration: "40.5 hours",
+          link: "https://www.udemy.com/course/react-the-complete-guide-incl-hooks-react-router-redux/",
+          educator: "Maximilian Schwarzmüller",
+          skill_covered: "React, Hooks, Redux",
+          difficulty_level: "All Levels",
+          rating: "4.7/5"
+        },
+        {
+          course_name: "Complete SQL Bootcamp",
+          platform: "Udemy",
+          duration: "9 hours",
+          link: "https://www.udemy.com/course/the-complete-sql-bootcamp/",
+          educator: "Jose Portilla",
+          skill_covered: "SQL, PostgreSQL",
+          difficulty_level: "Beginner to Advanced",
+          rating: "4.6/5"
+        }
+      ];
+      
+      setOverallRecommendations(mockRecommendations);
+      setSkillsWithRecommendations(['React', 'SQL']);
+      setShowOverallRecommendations(true);
+    } finally {
+      setLoadingRecommendations(false);
+    }
+  };
+
   const fetchJobs = async (skills: string[]) => {
     setLoading(true);
     setError('');
-    setJobs([]); // Clear previous jobs
-    setExpandedJobs(new Set()); // Collapse all cards
+    setJobs([]);
+    setExpandedJobs(new Set());
+    setShowOverallRecommendations(false);
+    setOverallRecommendations([]);
 
     try {
       if (skills.length === 0) {
@@ -183,7 +355,7 @@ const App: React.FC = () => {
         },
         body: JSON.stringify({
           skills: skills,
-          limit: 15 // Limit to 15 jobs
+          limit: 10
         })
       });
 
@@ -191,143 +363,23 @@ const App: React.FC = () => {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // UPDATED: Handle the new response structure
       const data: ApiResponse = await response.json();
       console.log('Received jobs:', data.jobs);
       const processedJobs = processJobData(data.jobs || []);
       setJobs(processedJobs);
+
+      // NEW: After getting jobs, fetch overall recommendations for unmatched skills
+      if (processedJobs.length > 0) {
+        const unmatchedSkills = getUnmatchedSkills(processedJobs, skills);
+        if (unmatchedSkills.length > 0) {
+          await fetchOverallRecommendations(unmatchedSkills);
+        }
+      }
+      
     } catch (err) {
       console.error('Error fetching jobs:', err);
       setError('Failed to connect to backend. Showing demo data.');
-      
-      // UPDATED: Mock data now includes recommendations per job
-      const mockJobs: BackendJob[] = [
-        {
-          ncspjobid: "20T85-2334143805041J",
-          title: "Data Analyst",
-          match_percentage: 95.0,
-          similarity_score: 0.42050665616989136,
-          keywords: "MS Excel,Power BI,Python,SQL",
-          description: "Should speak Hindi. Python coding using Pandas & Lambda Expressions. Knowledge in MS SQL Server. Should have scored minimum 80% in Engineering. Looking for candidates with strong analytical skills and ability to work with large datasets.",
-          date: "2025-07-30",
-          organizationid: 6530846,
-          organization_name: "Apna",
-          numberofopenings: 80,
-          industryname: "IT and Communication",
-          sectorname: "Company",
-          functionalareaname: "Data Analytics",
-          functionalrolename: "Data Analyst",
-          aveexp: 6.0,
-          avewage: 15000.0,
-          gendercode: "A",
-          highestqualification: "Graduate",
-          statename: "Andhra Pradesh",
-          districtname: "Visakhapatnam",
-          recommendations: [
-            {
-              course_name: "Python for Data Science",
-              platform: "Coursera",
-              duration: "6 weeks",
-              link: "https://www.coursera.org/specializations/machine-learning-introduction",
-              educator: "University of Michigan",
-              skill_covered: "Python, Pandas, Data Analysis",
-              difficulty_level: "Intermediate",
-              rating: "4.8/5"
-            },
-            {
-              course_name: "SQL for Data Science",
-              platform: "Coursera",
-              duration: "4 weeks",
-              link: "https://www.coursera.org/learn/sql-for-data-science",
-              educator: "University of California",
-              skill_covered: "SQL",
-              difficulty_level: "Beginner",
-              rating: "4.7/5"
-            }
-          ]
-        },
-        {
-          ncspjobid: "20T84-2340232902092J",
-          title: "Senior Data Analyst",
-          match_percentage: 88.0,
-          similarity_score: 0.38050665616989136,
-          keywords: "Python,SQL,Tableau,Data Visualization",
-          description: "Experience with data visualization tools like Tableau or Power BI. Strong Python programming skills with libraries like Pandas, NumPy. Experience in SQL query optimization and database management.",
-          date: "2025-07-29",
-          organizationid: 6530847,
-          organization_name: "TechCorp Solutions",
-          numberofopenings: 5,
-          industryname: "IT and Communication",
-          sectorname: "Company",
-          functionalareaname: "Data Analytics",
-          functionalrolename: "Senior Data Analyst",
-          aveexp: 8.0,
-          avewage: 25000.0,
-          gendercode: "A",
-          highestqualification: "Post Graduate",
-          statename: "Karnataka",
-          districtname: "Bangalore",
-          recommendations: [
-            {
-              course_name: "Advanced Tableau Course",
-              platform: "Udemy",
-              duration: "30 hours",
-              link: "https://www.udemy.com/topic/tableau/",
-              educator: "Various Instructors",
-              skill_covered: "Tableau, Data Visualization",
-              difficulty_level: "Advanced",
-              rating: "4.6/5"
-            }
-          ]
-        },
-        {
-          ncspjobid: "20T83-2340232902093J",
-          title: "Frontend Developer",
-          match_percentage: 82.0,
-          similarity_score: 0.35050665616989136,
-          keywords: "React,JavaScript,HTML,CSS,Node.js",
-          description: "Looking for React developers with experience in modern frontend development. Should be proficient in JavaScript, HTML5, CSS3, and have knowledge of state management libraries like Redux.",
-          date: "2025-07-28",
-          organizationid: 6530848,
-          organization_name: "WebTech Innovations",
-          numberofopenings: 12,
-          industryname: "IT and Communication",
-          sectorname: "Company",
-          functionalareaname: "Software Development",
-          functionalrolename: "Frontend Developer",
-          aveexp: 4.0,
-          avewage: 18000.0,
-          gendercode: "A",
-          highestqualification: "Graduate",
-          statename: "Maharashtra",
-          districtname: "Pune",
-          recommendations: [
-            {
-              course_name: "React - The Complete Guide",
-              platform: "Udemy",
-              duration: "40.5 hours",
-              link: "https://www.udemy.com/course/react-the-complete-guide-incl-hooks-react-router-redux/",
-              educator: "Maximilian Schwarzmüller",
-              skill_covered: "React, Hooks, Redux",
-              difficulty_level: "All Levels",
-              rating: "4.7/5"
-            },
-            {
-              course_name: "Complete JavaScript Course",
-              platform: "Jonas Schmedtmann",
-              duration: "69 hours",
-              link: "https://www.udemy.com/course/the-complete-javascript-course-2023/",
-              educator: "Jonas Schmedtmann",
-              skill_covered: "JavaScript, ES6+",
-              difficulty_level: "Beginner to Intermediate",
-              rating: "4.8/5"
-            }
-          ]
-        }
-      ];
-      
-      const processedJobs = processJobData(mockJobs);
-      setJobs(processedJobs);
+     
 
     } finally {
       setLoading(false);
@@ -356,6 +408,21 @@ const App: React.FC = () => {
       newExpanded.add(jobId);
     }
     setExpandedJobs(newExpanded);
+  };
+
+  // NEW: Toggle skill recommendations expansion
+  const toggleSkillRecommendations = async (skill: string) => {
+    const newExpanded = new Set(expandedSkills);
+    if (newExpanded.has(skill)) {
+      newExpanded.delete(skill);
+    } else {
+      newExpanded.add(skill);
+      // Fetch recommendations for this specific skill if not already loaded
+      if (!overallRecommendations.some(rec => rec.skill_covered.toLowerCase().includes(skill.toLowerCase()))) {
+        await fetchOverallRecommendations([skill]);
+      }
+    }
+    setExpandedSkills(newExpanded);
   };
 
   const getMatchScoreColor = (score: number): string => {
@@ -445,7 +512,7 @@ const App: React.FC = () => {
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="text-center mb-12">
               <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">
-                Discover Your Dream Job
+                Find Your Profile Match with AI
               </h2>
               <p className="text-xl text-indigo-100 mb-2">
                 Enter your skills and let AI find the perfect matches
@@ -581,6 +648,7 @@ const App: React.FC = () => {
           </div>
         )}
 
+        {/* Jobs List */}
         <div className="space-y-6">
           {jobs.map((job) => (
             <div key={job.ncspjobid} className="bg-white/80 backdrop-blur-md rounded-2xl shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden border border-white/20">
@@ -633,7 +701,7 @@ const App: React.FC = () => {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 p-4 bg-slate-50/80 rounded-xl">
-                    <DollarSign className="h-5 w-5 text-amber-500" />
+                    <IndianRupee className="h-5 w-5 text-amber-500" />
                     <div>
                       <div className="text-sm text-slate-500">Salary</div>
                       <div className="font-semibold text-slate-700">{job.salaryText}</div>
@@ -642,7 +710,7 @@ const App: React.FC = () => {
                   <div className="flex items-center gap-3 p-4 bg-slate-50/80 rounded-xl">
                     <GraduationCap className="h-5 w-5 text-purple-500" />
                     <div>
-                      <div className="text-sm text-slate-500">Education</div>
+                      <div className="text-sm text-slate-500">Qualification Required</div>
                       <div className="font-semibold text-slate-700">{job.highestqualification}</div>
                     </div>
                   </div>
@@ -758,8 +826,8 @@ const App: React.FC = () => {
                               </div>
                             </div>
                             <div className="flex items-center justify-between">
-                              <span className="text-slate-600 text-sm">Similarity Score</span>
-                              <span className="font-medium text-slate-900">{(job.similarity_score * 100).toFixed(1)}%</span>
+                              {/* <span className="text-slate-600 text-sm">Similarity Score</span>
+                              <span className="font-medium text-slate-900">{(job.similarity_score * 100).toFixed(1)}%</span> */}
                             </div>
                             <div className="text-xs text-slate-500">
                               Based on skills, experience, and role relevance
@@ -777,60 +845,6 @@ const App: React.FC = () => {
                       <p className="text-slate-700 leading-relaxed">{job.description}</p>
                     </div>
 
-                    {/* NEW: Course Recommendations Section within the job details */}
-                    {job.recommendations.length > 0 && (
-                      <div className="bg-white/60 p-6 rounded-xl mb-6">
-                        <h4 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                          <BookOpen className="h-5 w-5 text-indigo-500" />
-                          Recommended Courses
-                        </h4>
-                        <p className="text-sm text-slate-600 mb-4">
-                          These courses can help you acquire the skills needed for this role.
-                        </p>
-                        <div className="grid md:grid-cols-2 gap-4">
-                          {job.recommendations.map((course, index) => (
-                            <a
-                              key={index}
-                              href={course.link}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="group block bg-slate-50/80 rounded-xl p-4 shadow-sm border border-slate-200 hover:shadow-md transition-all duration-200"
-                            >
-                              <div className="flex items-start gap-4">
-                                <div className="flex-shrink-0 bg-indigo-100 p-2 rounded-lg text-indigo-600">
-                                  <BookOpen className="h-5 w-5" />
-                                </div>
-                                <div className="flex-1">
-                                  <h5 className="text-base font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
-                                    {course.course_name}
-                                  </h5>
-                                  <p className="text-sm text-slate-700 mt-1">{course.platform}</p>
-                                </div>
-                                <ExternalLink className="h-5 w-5 text-slate-400 group-hover:text-indigo-600 transition-colors" />
-                              </div>
-                              <div className="mt-4 grid grid-cols-2 gap-2 text-sm text-slate-600">
-                                <div className="flex items-center gap-2">
-                                  <Tags className="h-4 w-4" />
-                                  <span>{course.skill_covered}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Clock4 className="h-4 w-4" />
-                                  <span>{course.duration}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Trophy className="h-4 w-4" />
-                                  <span>{course.difficulty_level}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <Smile className="h-4 w-4" />
-                                  <span>{course.rating}</span>
-                                </div>
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    )}
                     
                     <div className="flex items-center justify-between pt-6 border-t border-slate-200">
                       <div className={`px-6 py-3 rounded-xl border ${getMatchScoreColor(job.match_percentage)}`}>
@@ -861,6 +875,131 @@ const App: React.FC = () => {
             </div>
           ))}
         </div>
+
+        {/* NEW: Overall Course Recommendations Section */}
+        {showOverallRecommendations && skillsWithRecommendations.length > 0 && (
+          <div className="mt-16 mb-8">
+            <div className="bg-gradient-to-r from-purple-50 to-indigo-50 rounded-3xl p-8 border border-purple-200">
+              <div className="text-center mb-8">
+                <div className="bg-gradient-to-r from-purple-500 to-indigo-500 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Lightbulb className="h-8 w-8 text-white" />
+                </div>
+                <h3 className="text-3xl font-bold text-slate-900 mb-4">
+                  Boost Your Job Opportunities
+                </h3>
+                <p className="text-lg text-slate-600 max-w-3xl mx-auto">
+                  Complete courses in these skills to unlock more job opportunities and increase your match scores with top employers.
+                </p>
+              </div>
+
+              {/* Skills with expandable course recommendations */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+
+                {skillsWithRecommendations.map((skill) => (
+                  
+                  <div key={skill} className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 shadow-lg border border-white/40">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-gradient-to-r from-purple-100 to-indigo-100 p-3 rounded-xl">
+                          <Target className="h-6 w-6 text-purple-600" />
+                        </div>
+                        <div>
+                          <h4 className="text-lg font-bold text-slate-900">{skill}</h4>
+                          <p className="text-sm text-slate-600">High demand skill</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => toggleSkillRecommendations(skill)}
+                        disabled={loadingRecommendations}
+                        className="flex items-center gap-2 bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-600 hover:to-indigo-600 text-white px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 disabled:opacity-50"
+                      >
+                        {loadingRecommendations ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : expandedSkills.has(skill) ? (
+                          <ChevronUp className="h-4 w-4" />
+                        ) : (
+                          <PlusCircle className="h-4 w-4" />
+                        )}
+                        {expandedSkills.has(skill) ? 'Hide' : 'View'} Courses
+                      </button>
+                    </div>
+                    
+                    <div className="bg-gradient-to-r from-purple-100 to-indigo-100 rounded-xl p-4">
+                      <p className="text-purple-800 text-sm font-medium mb-2">
+                        💡 Learning this skill could increase your job matches by up to {getBoostPercentage(skill)}%
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-purple-700">
+                        <Star className="h-3 w-3" />
+                        <span>Highly sought after by employers</span>
+                      </div>
+                    </div>
+
+                    {/* Expandable course recommendations for this skill */}
+                    <AnimatePresence>
+                      {expandedSkills.has(skill) && (
+                        <motion.div
+                          initial={{ opacity: 0, height: 0 }}
+                          animate={{ opacity: 1, height: "auto" }}
+                          exit={{ opacity: 0, height: 0 }}
+                          className="mt-4 space-y-3"
+                        >
+                          {overallRecommendations
+                            .filter(course => course.skill_covered.toLowerCase().includes(skill.toLowerCase()))
+                            .map((course, index) => (
+                              <a
+                                key={index}
+                                href={course.link}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="group block bg-slate-50/80 rounded-xl p-4 shadow-sm border border-slate-200 hover:shadow-md transition-all duration-200"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div className="flex-shrink-0 bg-indigo-100 p-2 rounded-lg text-indigo-600">
+                                    <BookOpen className="h-4 w-4" />
+                                  </div>
+                                  <div className="flex-1">
+                                    <h5 className="text-sm font-bold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                                      {course.course_name}
+                                    </h5>
+                                    <p className="text-xs text-slate-600 mt-1">{course.platform}</p>
+                                    <div className="mt-2 flex items-center gap-4 text-xs text-slate-500">
+                                      <span className="flex items-center gap-1">
+                                        <Clock4 className="h-3 w-3" />
+                                        {course.duration}
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Trophy className="h-3 w-3" />
+                                        {course.difficulty_level}
+                                      </span>
+                                      <span className="flex items-center gap-1">
+                                        <Smile className="h-3 w-3" />
+                                        {course.rating}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <ExternalLink className="h-4 w-4 text-slate-400 group-hover:text-indigo-600 transition-colors" />
+                                </div>
+                              </a>
+                            ))}
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                ))}
+              </div>
+
+              <div className="text-center">
+                <p className="text-slate-600 mb-4">
+                  🚀 Complete these courses to stand out from other candidates and land your dream job!
+                </p>
+                <div className="flex items-center justify-center gap-2 text-sm text-slate-500">
+                  <Award className="h-4 w-4" />
+                  <span>Recommended by AI based on current job market trends</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {jobs.length === 0 && searchTrigger > 0 && !loading && (
           <div className="text-center py-16">
