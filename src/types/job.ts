@@ -1,5 +1,4 @@
-import React, { useState, useMemo } from 'react';
-import type { FC } from 'react';
+
 
 // =======================================================================
 // src/types/job.ts
